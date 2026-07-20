@@ -8,8 +8,8 @@ import { NavContextMenuPatchCallback } from "@api/ContextMenus";
 import { definePluginSettings } from "@api/Settings";
 import ErrorBoundary from "@components/ErrorBoundary";
 import definePlugin, { OptionType } from "@utils/types";
-import { findComponentByCodeLazy } from "@webpack";
-import { ContextMenuApi, Menu, RestAPI, useState } from "@webpack/common";
+import { findByCodeLazy, findByPropsLazy, findComponentByCodeLazy } from "@webpack";
+import { ContextMenuApi, Menu, RestAPI, SettingsRouter, Toasts, showToast, useState } from "@webpack/common";
 
 interface ConnectedAccountFull {
     id: string;
@@ -23,8 +23,7 @@ interface ConnectedAccountFull {
 // Connection types that support "Display as status"
 // Platforms like GitHub only support "Display on profile" and are excluded
 const SHOW_ACTIVITY_SUPPORTED = new Set([
-    "spotify", "steam", "twitch", "youtube", "xbox",
-    "leagueoflegends", "riotgames", "battlenet", "epicgames",
+    "spotify",
     "playstation", "psn", "playstation-stg",
 ]);
 
@@ -66,13 +65,14 @@ const settings = definePluginSettings({
         type: OptionType.SELECT,
         description: "How to access the connection toggles",
         options: [
-            { label: "Right-click account panel (requires AccountPanelServerProfile)", value: "rightClick", default: true },
-            { label: "Button in profile bar", value: "profileButton" },
+            { label: "Right-click account panel (requires AccountPanelServerProfile)", value: "rightClick" },
+            { label: "Button in profile bar", value: "profileButton", default: true },
         ],
     },
 });
 
 let cachedConnections: ConnectedAccountFull[] = [];
+let menuOpen = false;
 
 function getVisibleConnections() {
     return cachedConnections.filter(c => SHOW_ACTIVITY_SUPPORTED.has(c.type));
@@ -103,6 +103,7 @@ async function toggleActivity(account: ConnectedAccountFull) {
         });
     } catch (e) {
         console.error("[QuickConnectionToggle] Failed to update connection:", e);
+        showToast("Failed to update connection", Toasts.Type.FAILURE);
         await fetchConnections();
     }
 }
@@ -121,18 +122,41 @@ function ConnectionsMenu() {
     }
 
     return (
-        <Menu.Menu navId="vc-qct-panel" onClose={ContextMenuApi.closeContextMenu}>
-            <Menu.MenuGroup label="Show as Status">
+        <Menu.Menu navId="vc-qct-panel" onClose={() => { setTimeout(() => { menuOpen = false; }, 0); ContextMenuApi.closeContextMenu(); }}>
+            <Menu.MenuGroup label={
+                <span style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
+                    <span>Show as Status</span>
+                    <span
+                        onClick={e => { e.stopPropagation(); menuOpen = false; ContextMenuApi.closeContextMenu(); }}
+                        style={{ cursor: "pointer", lineHeight: 1, padding: "0 2px" }}
+                    >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M18.4 4L12 10.4L5.6 4L4 5.6L10.4 12L4 18.4L5.6 20L12 13.6L18.4 20L20 18.4L13.6 12L20 5.6L18.4 4Z" />
+                        </svg>
+                    </span>
+                </span> as any
+            }>
                 {connections.map(account => (
                     <Menu.MenuCheckboxItem
                         key={`${account.type}-${account.id}`}
                         id={`quick-conn-${account.type}-${account.id}`}
-                        label={PLATFORM_NAMES[account.type] ?? account.name}
+                        label={
+                            <span style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                                <PlatformIcon type={account.type} />
+                                {PLATFORM_NAMES[account.type] ?? account.name}
+                            </span> as any
+                        }
                         checked={account.show_activity}
                         action={() => toggle(account)}
                     />
                 ))}
             </Menu.MenuGroup>
+            <Menu.MenuSeparator />
+            <Menu.MenuItem
+                id="vc-qct-manage"
+                label="Manage Connections"
+                action={() => SettingsRouter.openUserSettings("connections_panel")}
+            />
         </Menu.Menu>
     );
 }
@@ -160,6 +184,14 @@ const accountPanelMenuPatch: NavContextMenuPatchCallback = children => {
 };
 
 const PanelButton = findComponentByCodeLazy(".GREEN,positionKeyStemOverride:");
+const useLegacyPlatformType: (type: string) => string = findByCodeLazy(".TWITTER_LEGACY:");
+const platforms: { get(type: string): { icon: { lightSVG: string; darkSVG: string; }; } | undefined; } = findByPropsLazy("isSupported", "getByUrl");
+
+function PlatformIcon({ type }: { type: string; }) {
+    const platform = platforms.get(useLegacyPlatformType(type));
+    if (!platform?.icon) return null;
+    return <img src={platform.icon.darkSVG} width={16} height={16} />;
+}
 
 function ConnectionIcon() {
     return (
@@ -180,7 +212,15 @@ function ConnectionsPanelButton(props: { nameplate?: any; }) {
             icon={ConnectionIcon}
             role="button"
             plated={props?.nameplate != null}
-            onClick={(e: React.MouseEvent) => ContextMenuApi.openContextMenu(e, () => <ConnectionsMenu />)}
+            onClick={(e: React.MouseEvent) => {
+                if (menuOpen) {
+                    menuOpen = false;
+                    ContextMenuApi.closeContextMenu();
+                    return;
+                }
+                menuOpen = true;
+                ContextMenuApi.openContextMenu(e, () => <ConnectionsMenu />);
+            }}
         />
     );
 }

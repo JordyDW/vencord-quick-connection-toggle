@@ -9,7 +9,7 @@ import { definePluginSettings } from "@api/Settings";
 import ErrorBoundary from "@components/ErrorBoundary";
 import definePlugin, { OptionType } from "@utils/types";
 import { findByCodeLazy, findByPropsLazy, findComponentByCodeLazy } from "@webpack";
-import { ContextMenuApi, Menu, RestAPI, SettingsRouter, Toasts, showToast, useState } from "@webpack/common";
+import { ContextMenuApi, Menu, RestAPI, SettingsRouter, Toasts, showToast, useEffect, useState } from "@webpack/common";
 
 interface ConnectedAccountFull {
     id: string;
@@ -69,10 +69,18 @@ const settings = definePluginSettings({
             { label: "Button in profile bar", value: "profileButton", default: true },
         ],
     },
+    showAccountName: {
+        type: OptionType.BOOLEAN,
+        description: "Show the linked account name alongside the platform name (e.g. Spotify · jordy123)",
+        default: true,
+    },
 });
 
 let cachedConnections: ConnectedAccountFull[] = [];
 let menuOpen = false;
+
+const connectionListeners = new Set<() => void>();
+function notifyConnectionChange() { connectionListeners.forEach(f => f()); }
 
 function getVisibleConnections() {
     return cachedConnections.filter(c => SHOW_ACTIVITY_SUPPORTED.has(c.type));
@@ -82,6 +90,7 @@ async function fetchConnections() {
     try {
         const { body } = await RestAPI.get({ url: "/users/@me/connections" });
         if (Array.isArray(body)) cachedConnections = body as ConnectedAccountFull[];
+        notifyConnectionChange();
     } catch (e) {
         console.error("[QuickConnectionToggle] Failed to fetch connections:", e);
     }
@@ -95,6 +104,7 @@ async function toggleActivity(account: ConnectedAccountFull) {
             ? { ...c, show_activity: newValue }
             : c
     );
+    notifyConnectionChange();
 
     try {
         await RestAPI.patch({
@@ -106,6 +116,20 @@ async function toggleActivity(account: ConnectedAccountFull) {
         showToast("Failed to update connection", Toasts.Type.FAILURE);
         await fetchConnections();
     }
+}
+
+function ConnectionLabel({ account }: { account: ConnectedAccountFull; }) {
+    return (
+        <span style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <PlatformIcon type={account.type} />
+            <span>
+                {PLATFORM_NAMES[account.type] ?? account.name}
+                {settings.store.showAccountName && account.name && (
+                    <span style={{ opacity: 0.6, marginLeft: "4px" }}>· {account.name}</span>
+                )}
+            </span>
+        </span>
+    );
 }
 
 function ConnectionsMenu() {
@@ -120,6 +144,19 @@ function ConnectionsMenu() {
         ));
         await toggleActivity(account);
     }
+
+    async function toggleAll() {
+        const newValue = !connections.every(c => c.show_activity);
+        const toToggle = connections.filter(c => c.show_activity !== newValue);
+        setConnections(prev => prev.map(c =>
+            toToggle.some(t => t.type === c.type && t.id === c.id)
+                ? { ...c, show_activity: newValue }
+                : c
+        ));
+        for (const account of toToggle) await toggleActivity(account);
+    }
+
+    const allActive = connections.every(c => c.show_activity);
 
     return (
         <Menu.Menu navId="vc-qct-panel" onClose={() => { setTimeout(() => { menuOpen = false; }, 0); ContextMenuApi.closeContextMenu(); }}>
@@ -140,18 +177,20 @@ function ConnectionsMenu() {
                     <Menu.MenuCheckboxItem
                         key={`${account.type}-${account.id}`}
                         id={`quick-conn-${account.type}-${account.id}`}
-                        label={
-                            <span style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                                <PlatformIcon type={account.type} />
-                                {PLATFORM_NAMES[account.type] ?? account.name}
-                            </span> as any
-                        }
+                        label={<ConnectionLabel account={account} /> as any}
                         checked={account.show_activity}
                         action={() => toggle(account)}
                     />
                 ))}
             </Menu.MenuGroup>
             <Menu.MenuSeparator />
+            {connections.length > 1 && (
+                <Menu.MenuItem
+                    id="vc-qct-toggle-all"
+                    label={allActive ? "Disable All" : "Enable All"}
+                    action={toggleAll}
+                />
+            )}
             <Menu.MenuItem
                 id="vc-qct-manage"
                 label="Manage Connections"
@@ -174,7 +213,7 @@ const accountPanelMenuPatch: NavContextMenuPatchCallback = children => {
                 <Menu.MenuCheckboxItem
                     key={`${account.type}-${account.id}`}
                     id={`quick-conn-${account.type}-${account.id}`}
-                    label={PLATFORM_NAMES[account.type] ?? account.name}
+                    label={<ConnectionLabel account={account} /> as any}
                     checked={account.show_activity}
                     action={() => toggleActivity(account)}
                 />
@@ -203,14 +242,26 @@ function ConnectionIcon() {
 
 function ConnectionsPanelButton(props: { nameplate?: any; }) {
     const { trigger } = settings.use(["trigger"]);
+    const [, rerender] = useState(0);
+
+    useEffect(() => {
+        const handler = () => rerender(n => n + 1);
+        connectionListeners.add(handler);
+        return () => { connectionListeners.delete(handler); };
+    }, []);
+
     if (trigger !== "profileButton") return null;
-    if (!getVisibleConnections().length) return null;
+    const visible = getVisibleConnections();
+    if (!visible.length) return null;
+
+    const anyActive = visible.some(c => c.show_activity);
 
     return (
         <PanelButton
             tooltipText="Toggle Connection Status"
             icon={ConnectionIcon}
             role="button"
+            redGlow={!anyActive}
             plated={props?.nameplate != null}
             onClick={(e: React.MouseEvent) => {
                 if (menuOpen) {

@@ -9,7 +9,7 @@ import { definePluginSettings } from "@api/Settings";
 import ErrorBoundary from "@components/ErrorBoundary";
 import definePlugin, { OptionType } from "@utils/types";
 import { findComponentByCodeLazy } from "@webpack";
-import { ContextMenuApi, Menu, RestAPI } from "@webpack/common";
+import { ContextMenuApi, Menu, RestAPI, useState } from "@webpack/common";
 
 interface ConnectedAccountFull {
     id: string;
@@ -70,19 +70,12 @@ const settings = definePluginSettings({
             { label: "Button in profile bar", value: "profileButton" },
         ],
     },
-    hideUnsupported: {
-        type: OptionType.BOOLEAN,
-        description: "Only show connections that support 'Display as status' — hides platforms like GitHub that only offer 'Display on profile'",
-        default: true,
-    },
 });
 
 let cachedConnections: ConnectedAccountFull[] = [];
 
 function getVisibleConnections() {
-    return settings.store.hideUnsupported
-        ? cachedConnections.filter(c => SHOW_ACTIVITY_SUPPORTED.has(c.type))
-        : cachedConnections;
+    return cachedConnections.filter(c => SHOW_ACTIVITY_SUPPORTED.has(c.type));
 }
 
 async function fetchConnections() {
@@ -114,26 +107,35 @@ async function toggleActivity(account: ConnectedAccountFull) {
     }
 }
 
-function ConnectionMenuItems() {
-    return getVisibleConnections().map(account => (
-        <Menu.MenuCheckboxItem
-            key={`${account.type}-${account.id}`}
-            id={`quick-conn-${account.type}-${account.id}`}
-            label={PLATFORM_NAMES[account.type] ?? account.name}
-            checked={account.show_activity}
-            action={() => toggleActivity(account)}
-        />
-    ));
-}
+function ConnectionsMenu() {
+    const [connections, setConnections] = useState(() => getVisibleConnections());
 
-// Standalone menu opened from the profile bar button
-const ConnectionsStandaloneMenu = ErrorBoundary.wrap(() => (
-    <Menu.Menu navId="vc-qct-panel" onClose={ContextMenuApi.closeContextMenu}>
-        <Menu.MenuGroup label="Show as Status">
-            <ConnectionMenuItems />
-        </Menu.MenuGroup>
-    </Menu.Menu>
-), { noop: true });
+    async function toggle(account: ConnectedAccountFull) {
+        const newValue = !account.show_activity;
+        setConnections(prev => prev.map(c =>
+            c.type === account.type && c.id === account.id
+                ? { ...c, show_activity: newValue }
+                : c
+        ));
+        await toggleActivity(account);
+    }
+
+    return (
+        <Menu.Menu navId="vc-qct-panel" onClose={ContextMenuApi.closeContextMenu}>
+            <Menu.MenuGroup label="Show as Status">
+                {connections.map(account => (
+                    <Menu.MenuCheckboxItem
+                        key={`${account.type}-${account.id}`}
+                        id={`quick-conn-${account.type}-${account.id}`}
+                        label={PLATFORM_NAMES[account.type] ?? account.name}
+                        checked={account.show_activity}
+                        action={() => toggle(account)}
+                    />
+                ))}
+            </Menu.MenuGroup>
+        </Menu.Menu>
+    );
+}
 
 // Injected into the right-click menu created by AccountPanelServerProfile
 const accountPanelMenuPatch: NavContextMenuPatchCallback = children => {
@@ -178,7 +180,7 @@ function ConnectionsPanelButton(props: { nameplate?: any; }) {
             icon={ConnectionIcon}
             role="button"
             plated={props?.nameplate != null}
-            onClick={(e: React.MouseEvent) => ContextMenuApi.openContextMenu(e, ConnectionsStandaloneMenu)}
+            onClick={(e: React.MouseEvent) => ContextMenuApi.openContextMenu(e, () => <ConnectionsMenu />)}
         />
     );
 }

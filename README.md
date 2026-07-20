@@ -14,7 +14,6 @@ A [Vencord](https://github.com/Vendicated/Vencord) plugin that lets you toggle "
 | Setting | Description |
 |---|---|
 | **Trigger** | Right-click account panel (requires AccountPanelServerProfile) or button in profile bar |
-| **Hide unsupported** | Only show connections that have a "Display as status" toggle — hides platforms like GitHub that only offer "Display on profile" |
 
 ## Installation
 

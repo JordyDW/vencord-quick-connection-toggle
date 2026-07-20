@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-VENCORD_DIR="$(cd "$(dirname "$0")/../../../.." && pwd)"
+VENCORD_DIR="$HOME/vencord"
 VESKTOP_DIR="$HOME/.config/vesktop/sessionData/vencordFiles"
 
 echo "Building..."

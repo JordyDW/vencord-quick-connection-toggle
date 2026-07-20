@@ -7,7 +7,7 @@ A [Vencord](https://github.com/Vendicated/Vencord) plugin that lets you toggle "
 - Toggle connections from a right-click menu on the account panel, or via a dedicated button in the profile bar — configurable in plugin settings
 - Automatically filters out connections that don't support "Display as status" (e.g. GitHub), so the list only shows actionable items
 - Supports all platforms that Discord supports for activity status (Spotify, PlayStation, Steam, Twitch, Xbox, etc.)
-- Optimistic UI updates — the menu reflects changes immediately on next open
+- Checkboxes update instantly in the menu — no need to close and reopen
 
 ## Settings
 
